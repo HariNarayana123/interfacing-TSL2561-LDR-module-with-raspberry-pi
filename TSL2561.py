@@ -73,5 +73,5 @@ while True:
     # Print lux value
     print("Lux: {:.2f}".format(lux))
 
-    # Wait for next measurement
+    #Wait for next measurement
     time.sleep(1)
