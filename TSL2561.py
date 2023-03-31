@@ -1,8 +1,8 @@
-import smbus
+import RPi.GPIO as GPIO
 import time
 
 # Define TSL2561 register addresses
-TSL2561_ADDR = 0x39
+dev_addr = 0x39 # ADD sel_terminalconnected to GND
 TSL2561_CMD = 0x80
 TSL2561_REG_CONTROL = 0x00
 TSL2561_REG_TIMING = 0x01
@@ -17,16 +17,107 @@ TSL2561_REG_DATA0HIGH = 0x0D
 TSL2561_REG_DATA1LOW = 0x0E
 TSL2561_REG_DATA1HIGH = 0x0F
 
-# Initialize the I2C bus
-bus = smbus.SMBus(1)
+# Define the GPIO pins for SDA and SCL
+SDA_PIN = 26
+SCL_PIN = 21
+
+
+# Set up the GPIO pins in BCM mode(uses GPIO numbers)
+GPIO.setmode(GPIO.BCM)
+
+#set up the SDA_PIN and SCL_PIN as output pins
+GPIO.setup(SDA_PIN, GPIO.OUT)
+GPIO.setup(SCL_PIN, GPIO.OUT)
+
+
+# Define the I2C start signal
+def i2c_start():
+    GPIO.output(SDA_PIN, GPIO.HIGH)
+    GPIO.output(SCL_PIN, GPIO.HIGH)
+    time.sleep(0.00000005)
+    GPIO.output(SDA_PIN, GPIO.LOW)
+    time.sleep(0.00000005)
+    GPIO.output(SCL_PIN, GPIO.LOW)
+
+# Define the I2C stop signal
+def i2c_stop():
+    GPIO.output(SDA_PIN, GPIO.LOW)
+    GPIO.output(SCL_PIN, GPIO.LOW)
+    time.sleep(0.00000005)
+    GPIO.output(SCL_PIN, GPIO.HIGH)
+    time.sleep(0.00000005)
+    GPIO.output(SDA_PIN, GPIO.HIGH)
+    
+
+# Define the I2C write function
+def i2c_write_byte(byte):
+    for bit in range(8):
+        if byte & (1 << (7 - bit)):
+            GPIO.output(SDA_PIN, GPIO.HIGH)
+        else:
+            GPIO.output(SDA_PIN, GPIO.LOW)
+        GPIO.output(SCL_PIN, GPIO.HIGH)
+        time.sleep(0.00000005)
+        GPIO.output(SCL_PIN, GPIO.LOW)
+        
+# Define the acknowledge
+def ACK():	
+    GPIO.output(SDA_PIN, GPIO.HIGH)
+    GPIO.output(SCL_PIN, GPIO.HIGH)
+    time.sleep(0.00000005)
+    while(SDA_PIN == GPIO.HIGH):
+         continue
+    time.sleep(0.00000005)
+    GPIO.output(SCL_PIN, GPIO.LOW)
+    
+    
+    
+# Define the I2C read function
+def i2c_read_byte():
+    byte = 0
+    for bit in range(8):
+        GPIO.output(SCL_PIN, GPIO.HIGH)
+        time.sleep(0.00000003)
+        if GPIO.input(SDA_PIN):
+            byte |= 1 << (7 - bit)
+        GPIO.output(SCL_PIN, GPIO.LOW)
+    return byte
+
+# Define non-acknowledgement function
+def NACK():	
+    GPIO.output(SDA_PIN, GPIO.HIGH)
+    GPIO.output(SCL_PIN, GPIO.HIGH)
+    time.sleep(0.00000005)
+    GPIO.output(SCL_PIN, GPIO.LOW)
+
+
 
 # Write to TSL2561 register
 def write_byte(reg, value):
-    bus.write_byte_data(TSL2561_ADDR, reg | TSL2561_CMD, value)
+      i2c_start() # send the start signal
+      i2c_write_byte(dev_addr <<1) # send the device address with 8th bit as zero for writing
+      ACK() # sending the acknowledgement
+      i2c_write_byte(reg | TSL2561_CMD) # specifies register address
+      ACK() # sending the acknowledgement
+      i2c_write_byte(value) # write the Data Byte to register reg   
+      ACK() # sending the acknowledgement
+      i2c_stop() # send the stop signal
 
 # Read from TSL2561 register
 def read_byte(reg):
-    return bus.read_byte_data(TSL2561_ADDR, reg | TSL2561_CMD)
+      i2c_start() # send the start signal
+      i2c_write_byte(dev_addr <<1) # send the device address with 8th bit as zero for writing
+      ACK() # sending the acknowledgement
+      i2c_write_byte(reg | TSL2561_CMD) # specifies register address
+      ACK() # sending the acknowledgement
+      i2c_start() # send the start signal 
+      i2c_write_byte(dev_addr <<1 | 0x00) # write the Data Byte to register reg   
+      ACK() # sending the acknowledgement
+      data = i2c_read_byte() # read the 1st byte of data (MSB)
+      ACK() # sending the acknowledgement
+      i2c_stop() # send the stop signal
+        
+    return data
 
 # Read 16-bit value from two registers, LSB first
 def read_word(reg):
@@ -50,6 +141,7 @@ set_integration_time_gain(0x02, 0x00)
 
 # Read light sensor values
 while True:
+  try: 
     # Read raw sensor values
     data0 = read_word(TSL2561_REG_DATA0LOW)
     data1 = read_word(TSL2561_REG_DATA1LOW)
@@ -70,8 +162,13 @@ while True:
         else:
             lux = 0
 
-    # Print lux value
+    # Print lux value (lux= lumious flux/ unit area)
     print("Lux: {:.2f}".format(lux))
 
     #Wait for next measurement
-    time.sleep(1)
+    time.sleep(1)    
+  except KeyboardInterrupt:
+    print("User interrupted the program.")
+    sys.exit()
+  finally:
+    GPIO.cleanup()
